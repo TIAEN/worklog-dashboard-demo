@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Worklog Dashboard Demo</title>
+    <link rel="stylesheet" href="assets/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="项目导航">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div>
+            <div class="brand-title">Worklog</div>
+            <div class="brand-subtitle">示例知识库工作台</div>
+          </div>
+        </div>
+
+        <div class="nav-block">
+          <div class="nav-heading">分类</div>
+          <div id="categoryList" class="nav-list"></div>
+        </div>
+
+        <div class="nav-block nav-block-fill">
+          <div class="nav-heading">项目</div>
+          <div id="projectList" class="project-list"></div>
+        </div>
+
+        <div class="nav-block">
+          <div class="nav-heading">关键词</div>
+          <div id="tagList" class="tag-cloud"></div>
+        </div>
+      </aside>
+
+      <div id="leftResizeHandle" class="resize-handle resize-handle-left" role="separator" aria-label="调整左侧栏宽度" aria-orientation="vertical" title="拖动调整左侧栏宽度"></div>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div class="search-wrap">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m21 21-4.35-4.35m1.35-5.15a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z"></path>
+            </svg>
+            <input id="searchInput" type="search" placeholder="搜索项目、日期、主题、关键词，按 / 聚焦">
+          </div>
+          <div class="topbar-actions">
+            <div id="liveStatus" class="live-status" aria-live="polite">
+              <span class="live-dot" aria-hidden="true"></span>
+              <span id="liveStatusText">实时监听</span>
+            </div>
+            <select id="statusFilter" aria-label="按状态筛选">
+              <option value="all">全部状态</option>
+              <option value="已完成">已完成</option>
+              <option value="需要关注">需要关注</option>
+              <option value="记录">记录</option>
+            </select>
+            <button id="resetButton" class="icon-button" type="button" title="重置筛选">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 12a9 9 0 1 0 3-6.7M3 4v6h6"></path>
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <section class="overview-band" aria-label="日志概览">
+          <div class="overview-copy">
+            <div class="eyebrow">WORKLOG OPERATIONS</div>
+            <h1>工作记录工作台</h1>
+            <p id="generatedMeta">正在读取示例日志索引...</p>
+          </div>
+          <div id="statGrid" class="stat-grid"></div>
+        </section>
+
+        <section id="searchPanel" class="search-panel" aria-label="搜索命中" hidden>
+          <div class="section-head">
+            <div>
+              <div class="section-title">搜索命中</div>
+              <div id="searchMeta" class="section-subtitle">输入关键词后显示匹配日志</div>
+            </div>
+            <div id="searchCount" class="result-count">0 条命中</div>
+          </div>
+          <div id="searchResults" class="search-results"></div>
+        </section>
+
+        <section class="activity-band" aria-label="最近活跃度">
+          <div class="section-head">
+            <div>
+              <div class="section-title">时间热力</div>
+              <div id="activityMeta" class="section-subtitle">最近活跃日期</div>
+            </div>
+            <div id="resultCount" class="result-count">0 条记录</div>
+          </div>
+          <div id="activityStrip" class="activity-strip"></div>
+        </section>
+
+        <section class="wordheat-band" aria-label="热力词图">
+          <div class="section-head">
+            <div>
+              <div class="section-title">热力词图</div>
+              <div id="wordHeatMeta" class="section-subtitle">按当前筛选统计高频主题</div>
+            </div>
+            <div id="wordHeatCount" class="result-count">0 个词</div>
+          </div>
+          <div id="wordHeatCloud" class="wordheat-cloud"></div>
+        </section>
+
+        <section class="timeline-band" aria-label="日志时间线">
+          <div class="section-head">
+            <div>
+              <div class="section-title">倒序时间线</div>
+              <div class="section-subtitle">点击日志可在右侧查看章节、产物和原文</div>
+            </div>
+            <div class="kbd-hints">
+              <span>/</span>
+              <span>J</span>
+              <span>K</span>
+              <span>Enter</span>
+            </div>
+          </div>
+          <div id="timeline" class="timeline"></div>
+        </section>
+      </main>
+
+      <div id="rightResizeHandle" class="resize-handle resize-handle-right" role="separator" aria-label="调整右侧详情栏宽度" aria-orientation="vertical" title="拖动调整右侧详情栏宽度"></div>
+
+      <div id="detailBackdrop" class="detail-backdrop" aria-hidden="true"></div>
+      <aside class="detail-panel" aria-label="日志详情">
+        <button id="detailClose" class="detail-close" type="button" title="关闭详情">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18M6 6l12 12"></path>
+          </svg>
+        </button>
+        <div id="detailContent" class="detail-content"></div>
+      </aside>
+    </div>
+
+    <script src="assets/worklog-data.js"></script>
+    <script src="assets/app.js"></script>
+  </body>
+</html>
