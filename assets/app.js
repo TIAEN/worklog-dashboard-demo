@@ -11,6 +11,17 @@ let data = normalizeData(window.WORKLOG_DATA);
 let searchIndex = buildSearchIndex(data);
 let dataSignature = getDataSignature(data);
 let liveTimer = null;
+let liveRefreshResumeTimer = null;
+let liveRefreshAbortController = null;
+let liveHealth = { connected: false, checked: false, text: '监听未连接' };
+let wordCloudFrame = null;
+let wordCloudObserver = null;
+let wordCloudVisible = true;
+let wordCloudPauseUntil = 0;
+let liveRefreshPauseUntil = 0;
+let wordCloudResumeTimer = null;
+let scrollIdleTimer = null;
+let resumeWordCloudAnimation = null;
 
 const state = {
   query: '',
@@ -53,6 +64,7 @@ const el = {
 
 const heatStopWords = new Set([
   '工作',
+  '工作日志',
   '日志',
   '记录',
   '处理',
@@ -79,6 +91,35 @@ const heatStopWords = new Set([
   '功能',
   '页面',
   '显示',
+  '项目',
+  '任务',
+  '今日完成',
+  '处理中的问题',
+  '明日计划',
+  '备注',
+  '背景',
+  'users',
+  'fly',
+  'img',
+  'img2',
+  'png',
+  'jpg',
+  'jpeg',
+  'svg',
+  'md',
+  'html',
+  'assets',
+  'worklogs',
+  'desktop',
+  'npm',
+  'cmd',
+  'npm.cmd',
+  'debug',
+  'typecheck',
+  'fast',
+  'run',
+  'ai-chartparser',
+  '127',
   'the',
   'and',
   'for',
@@ -115,8 +156,21 @@ const heatKeyTerms = [
   'OCR',
   'CVAT',
   'curve',
-  'chart',
 ];
+
+function isUsefulHeatTerm(term) {
+  const word = String(term || '').trim();
+  const lower = word.toLowerCase();
+  if (!word || heatStopWords.has(word) || heatStopWords.has(lower)) return false;
+  if (/^\d+$/.test(word) || /^\d{4}[-./]\d{2}[-./]\d{2}$/.test(word)) return false;
+  if (word.length < 2 && !/^[A-Z]{2,}$/.test(word)) return false;
+  if (/^[a-z]:$/i.test(word)) return false;
+  if (/^img\d*$/i.test(word)) return false;
+  if (/^[a-z]{1,2}\d+$/i.test(word)) return false;
+  if (/^\.[\w-]+$/i.test(word)) return false;
+  if (/^[._-]+$/.test(word)) return false;
+  return true;
+}
 
 function normalizeData(value) {
   return {
@@ -515,14 +569,24 @@ function renderSearchPanel(records, baseRecords) {
 
 function collectWordHeat(records) {
   const counts = new Map();
+  const projectTerms = new Set();
+
+  records.forEach((record) => {
+    const repo = String(record.repo || '').trim();
+    if (!repo) return;
+    projectTerms.add(repo.toLowerCase());
+    repo
+      .replace(/[^\u4e00-\u9fffA-Za-z0-9+#]+/g, ' ')
+      .split(/\s+/)
+      .forEach((part) => {
+        if (part.length >= 3) projectTerms.add(part.toLowerCase());
+      });
+  });
 
   const addTerm = (term, weight = 1) => {
     const word = String(term || '').trim();
-    if (!word) return;
-    const lower = word.toLowerCase();
-    if (heatStopWords.has(word) || heatStopWords.has(lower)) return;
-    if (/^\d+$/.test(word) || /^\d{4}[-./]\d{2}[-./]\d{2}$/.test(word)) return;
-    if (word.length < 2 && !/^[A-Z]{2,}$/.test(word)) return;
+    if (!isUsefulHeatTerm(word)) return;
+    if (projectTerms.has(word.toLowerCase())) return;
     counts.set(word, (counts.get(word) || 0) + weight);
   };
 
@@ -551,7 +615,6 @@ function collectWordHeat(records) {
 
   records.forEach((record) => {
     (record.tags || []).forEach((tag) => addTerm(tag, 4));
-    addText(record.repo, 2);
     addText(record.title, 3);
     addText(record.summary, 2);
     (record.sections || []).forEach((section) => {
@@ -567,11 +630,12 @@ function collectWordHeat(records) {
 }
 
 function renderWordHeat(records, options = {}) {
+  stopWordCloudSphere();
   const words = collectWordHeat(records);
   el.wordHeatCount.textContent = `${words.length} 个词`;
   el.wordHeatMeta.textContent = options.fallback
-    ? `搜索暂无命中，显示当前筛选 ${records.length} 条记录的主题热度`
-    : `按当前结果 ${records.length} 条记录统计高频主题`;
+    ? `搜索暂无命中，显示当前筛选 ${records.length} 条记录的主题词球`
+    : `按当前结果 ${records.length} 条记录统计高频主题词球`;
 
   if (!words.length) {
     el.wordHeatCloud.innerHTML = '<div class="empty-state">暂无可统计的主题词。</div>';
@@ -579,16 +643,175 @@ function renderWordHeat(records, options = {}) {
   }
 
   const max = Math.max(1, ...words.map((item) => item.count));
-  el.wordHeatCloud.innerHTML = words
-    .map((item) => {
-      const heat = Math.max(0.08, item.count / max).toFixed(3);
+  const min = Math.min(...words.map((item) => item.count));
+  const spread = Math.max(1, max - min);
+  const tokenHtml = words
+    .map((item, index) => {
+      const heat = Math.max(0.12, Math.sqrt((item.count - min) / spread)).toFixed(3);
+      const hue = [218, 246, 174][index % 3];
+      const point = getSpherePoint(index, words.length);
       return `
-        <button class="wordheat-token" data-word-query="${escapeHtml(item.word)}" type="button" style="--heat:${heat}">
-          ${escapeHtml(item.word)}<small>${escapeHtml(item.count)}</small>
+        <button
+          class="wordheat-token"
+          data-word-query="${escapeHtml(item.word)}"
+          data-x="${point.x}"
+          data-y="${point.y}"
+          data-z="${point.z}"
+          data-rank="${index + 1}"
+          type="button"
+          style="--heat:${heat}; --hue:${hue}; --rank:${index + 1}"
+          aria-label="搜索主题词 ${escapeHtml(item.word)}，出现 ${escapeHtml(item.count)} 次"
+        >
+          <span class="wordheat-token-label">${escapeHtml(item.word)}</span><small>${escapeHtml(item.count)}</small>
         </button>
       `;
     })
     .join('');
+  el.wordHeatCloud.innerHTML = `
+    <div class="wordheat-sphere" aria-label="可旋转热力词球">
+      ${tokenHtml}
+    </div>
+  `;
+  setupWordCloudSphere();
+}
+
+function getSpherePoint(index, total) {
+  // Fibonacci 球面分布可以减少词块聚集，避免固定纬线造成明显堆叠。
+  const safeTotal = Math.max(1, total);
+  const offset = 2 / safeTotal;
+  const increment = Math.PI * (3 - Math.sqrt(5));
+  const y = index * offset - 1 + offset / 2;
+  const radius = Math.sqrt(Math.max(0, 1 - y * y));
+  const angle = index * increment;
+  return {
+    x: Number((Math.cos(angle) * radius).toFixed(6)),
+    y: Number(y.toFixed(6)),
+    z: Number((Math.sin(angle) * radius).toFixed(6)),
+  };
+}
+
+function stopWordCloudSphere() {
+  if (wordCloudFrame) {
+    window.cancelAnimationFrame(wordCloudFrame);
+    wordCloudFrame = null;
+  }
+  if (wordCloudObserver) {
+    wordCloudObserver.disconnect();
+    wordCloudObserver = null;
+  }
+  if (wordCloudResumeTimer) {
+    window.clearTimeout(wordCloudResumeTimer);
+    wordCloudResumeTimer = null;
+  }
+  wordCloudVisible = true;
+  resumeWordCloudAnimation = null;
+}
+
+function setupWordCloudSphere() {
+  const sphere = el.wordHeatCloud.querySelector('.wordheat-sphere');
+  if (!sphere) return;
+
+  const tokens = Array.from(sphere.querySelectorAll('.wordheat-token')).map((token) => ({
+    element: token,
+    x: Number(token.dataset.x || 0),
+    y: Number(token.dataset.y || 0),
+    z: Number(token.dataset.z || 0),
+    heat: Number.parseFloat(getComputedStyle(token).getPropertyValue('--heat')) || 0,
+  }));
+  if (!tokens.length) return;
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let rotationX = -0.18;
+  let rotationY = 0.28;
+  let pointerX = 0;
+  let pointerY = 0;
+
+  const setPointer = (event) => {
+    const rect = sphere.getBoundingClientRect();
+    pointerX = ((event.clientX - rect.left) / rect.width - 0.5) * 2;
+    pointerY = ((event.clientY - rect.top) / rect.height - 0.5) * 2;
+  };
+
+  sphere.addEventListener('pointermove', setPointer);
+  sphere.addEventListener('pointerleave', () => {
+    pointerX = 0;
+    pointerY = 0;
+  });
+
+  if ('IntersectionObserver' in window) {
+    wordCloudVisible = false;
+    wordCloudObserver = new IntersectionObserver((entries) => {
+      wordCloudVisible = entries.some((entry) => entry.isIntersecting);
+      if (wordCloudVisible) resumeWordCloudAnimation?.();
+    }, { threshold: 0.08 });
+    wordCloudObserver.observe(sphere);
+  }
+
+  const scheduleResume = (delay = 80) => {
+    if (reduceMotion) return;
+    if (wordCloudResumeTimer) window.clearTimeout(wordCloudResumeTimer);
+    wordCloudResumeTimer = window.setTimeout(() => {
+      wordCloudResumeTimer = null;
+      resumeWordCloudAnimation?.();
+    }, delay);
+  };
+
+  const scheduleFrame = () => {
+    if (reduceMotion || wordCloudFrame || !wordCloudVisible) return;
+    const remainingPause = wordCloudPauseUntil - performance.now();
+    if (remainingPause > 0) {
+      scheduleResume(remainingPause + 24);
+      return;
+    }
+    wordCloudFrame = window.requestAnimationFrame(tick);
+  };
+
+  const paint = () => {
+    const rect = sphere.getBoundingClientRect();
+    const radius = Math.max(92, Math.min(rect.width, rect.height) * 0.39);
+    const cosX = Math.cos(rotationX);
+    const sinX = Math.sin(rotationX);
+    const cosY = Math.cos(rotationY);
+    const sinY = Math.sin(rotationY);
+
+    tokens.forEach((item) => {
+      const y1 = item.y * cosX - item.z * sinX;
+      const z1 = item.y * sinX + item.z * cosX;
+      const x2 = item.x * cosY + z1 * sinY;
+      const z2 = -item.x * sinY + z1 * cosY;
+      const depth = (z2 + 1) / 2;
+      const scale = 0.58 + depth * 0.54 + item.heat * 0.18;
+      const opacity = 0.2 + depth * 0.78;
+      const x = x2 * radius;
+      const y = y1 * radius * 0.9;
+
+      item.element.style.setProperty('--x', `${x.toFixed(2)}px`);
+      item.element.style.setProperty('--y', `${y.toFixed(2)}px`);
+      item.element.style.setProperty('--scale', scale.toFixed(3));
+      item.element.style.setProperty('--depth', depth.toFixed(3));
+      item.element.style.setProperty('--depth-opacity', opacity.toFixed(3));
+      item.element.style.setProperty('--depth-lightness', `${(58 - depth * 31).toFixed(1)}%`);
+      item.element.style.zIndex = String(Math.round(depth * 1000));
+    });
+  };
+
+  const tick = () => {
+    wordCloudFrame = null;
+    if (!wordCloudVisible) return;
+    const remainingPause = wordCloudPauseUntil - performance.now();
+    if (remainingPause > 0) {
+      scheduleResume(remainingPause + 24);
+      return;
+    }
+    rotationY += 0.003 + pointerX * 0.005;
+    rotationX += 0.0012 - pointerY * 0.0035;
+    paint();
+    scheduleFrame();
+  };
+
+  resumeWordCloudAnimation = scheduleFrame;
+  paint();
+  scheduleFrame();
 }
 
 function groupByDate(records) {
@@ -819,6 +1042,48 @@ function setLiveStatus(status, text) {
   el.liveStatusText.textContent = text;
 }
 
+function applyLiveHealthStatus() {
+  if (liveHealth.connected) {
+    setLiveStatus('ready', liveHealth.text || '实时监听');
+  } else if (liveHealth.checked) {
+    setLiveStatus('warn', liveHealth.text || '监听未连接');
+  } else {
+    setLiveStatus('loading', '检测监听');
+  }
+}
+
+async function refreshLiveHealth() {
+  try {
+    const response = await fetch(`assets/worklog-status.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    const heartbeatAt = Number(payload?.heartbeat_at_ms);
+    const heartbeatAge = Number.isFinite(heartbeatAt) ? Date.now() - heartbeatAt : Number.POSITIVE_INFINITY;
+    if (payload?.watcher_running && heartbeatAge <= 10000) {
+      const age = Number(payload.data_age_seconds);
+      liveHealth = {
+        connected: true,
+        checked: true,
+        text: Number.isFinite(age) ? `实时监听 · ${Math.max(0, Math.round(age))} 秒前` : '实时监听',
+      };
+    } else {
+      liveHealth = {
+        connected: false,
+        checked: true,
+        text: Number.isFinite(heartbeatAge) ? `监听已断开 · ${Math.round(heartbeatAge / 1000)} 秒前` : '监听未连接',
+      };
+    }
+  } catch (error) {
+    liveHealth = {
+      connected: false,
+      checked: true,
+      text: '监听未连接',
+    };
+  }
+  applyLiveHealthStatus();
+  return liveHealth.connected;
+}
+
 function parseDataScript(text) {
   const match = text.match(/window\.WORKLOG_DATA\s*=\s*([\s\S]*?);\s*$/);
   if (!match) {
@@ -827,12 +1092,37 @@ function parseDataScript(text) {
   return JSON.parse(match[1]);
 }
 
+function scheduleLiveRefresh({ silent = true, delay = 0 } = {}) {
+  if (liveRefreshResumeTimer) window.clearTimeout(liveRefreshResumeTimer);
+  const remainingScrollPause = Math.max(0, liveRefreshPauseUntil - performance.now());
+  liveRefreshResumeTimer = window.setTimeout(() => {
+    liveRefreshResumeTimer = null;
+    if (!document.hidden) fetchLatestData({ silent });
+  }, Math.max(delay, remainingScrollPause + 180));
+}
+
 async function fetchLatestData({ silent = true } = {}) {
+  const remainingScrollPause = liveRefreshPauseUntil - performance.now();
+  if (remainingScrollPause > 0) {
+    scheduleLiveRefresh({ silent });
+    if (!silent) setLiveStatus('ready', '滚动中暂停刷新');
+    return false;
+  }
   if (!silent) setLiveStatus('loading', '正在刷新');
+  const controller = new AbortController();
+  liveRefreshAbortController = controller;
   try {
-    const response = await fetch(`assets/worklog-data.js?t=${Date.now()}`, { cache: 'no-store' });
+    const response = await fetch(`assets/worklog-data.js?t=${Date.now()}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const nextData = normalizeData(parseDataScript(await response.text()));
+    const text = await response.text();
+    if (performance.now() < liveRefreshPauseUntil) {
+      scheduleLiveRefresh({ silent });
+      return false;
+    }
+    const nextData = normalizeData(parseDataScript(text));
     const nextSignature = getDataSignature(nextData);
     if (nextSignature !== dataSignature) {
       data = nextData;
@@ -844,84 +1134,64 @@ async function fetchLatestData({ silent = true } = {}) {
       renderStats();
       render();
       setLiveStatus('updated', `已更新 ${data.generatedAt || ''}`.trim());
-      window.setTimeout(() => setLiveStatus('ready', '实时监听'), 1800);
+      window.setTimeout(() => applyLiveHealthStatus(), 1800);
       return true;
     }
-    setLiveStatus('ready', '实时监听');
+    await refreshLiveHealth();
     return false;
   } catch (error) {
+    if (error?.name === 'AbortError') return false;
     setLiveStatus('error', '监听中断');
     return false;
+  } finally {
+    if (liveRefreshAbortController === controller) {
+      liveRefreshAbortController = null;
+    }
   }
 }
 
 function startLiveRefresh() {
-  setLiveStatus('ready', '实时监听');
-  window.addEventListener('focus', () => fetchLatestData({ silent: false }));
+  applyLiveHealthStatus();
+  refreshLiveHealth();
+  window.addEventListener('focus', () => scheduleLiveRefresh({ silent: false, delay: 1200 }));
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) fetchLatestData({ silent: true });
+    if (!document.hidden) scheduleLiveRefresh({ silent: true, delay: 1200 });
   });
   liveTimer = window.setInterval(() => {
-    if (!document.hidden) fetchLatestData({ silent: true });
-  }, 4000);
+    if (!document.hidden) {
+      refreshLiveHealth();
+      scheduleLiveRefresh({ silent: true, delay: 1200 });
+    }
+  }, 15000);
 }
 
-function setupSmoothWheelScroll() {
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-
-  const active = new WeakMap();
-  const isEditable = (target) => ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName || '') || target?.isContentEditable;
-  const getScrollTarget = (target) => {
-    const scrollable = target.closest?.('.detail-content, .project-list, .markdown-preview');
-    if (scrollable && scrollable.scrollHeight > scrollable.clientHeight + 1) return scrollable;
-    return document.scrollingElement || document.documentElement;
-  };
-  const maxScrollTop = (target) => target.scrollHeight - target.clientHeight;
-
-  const animateTo = (target, destination) => {
-    const current = active.get(target);
-    if (current?.frame) window.cancelAnimationFrame(current.frame);
-
-    const state = {
-      start: target.scrollTop,
-      destination: Math.max(0, Math.min(maxScrollTop(target), destination)),
-      startedAt: performance.now(),
-      duration: 260,
-      frame: 0,
-    };
-
-    const step = (time) => {
-      const progress = Math.min(1, (time - state.startedAt) / state.duration);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      target.scrollTop = state.start + (state.destination - state.start) * eased;
-      if (progress < 1) {
-        state.frame = window.requestAnimationFrame(step);
-      } else {
-        active.delete(target);
-      }
-    };
-
-    state.frame = window.requestAnimationFrame(step);
-    active.set(target, state);
+function setupScrollResponsiveness() {
+  document.documentElement.style.scrollBehavior = 'auto';
+  const pauseWordCloud = () => {
+    const resumeDelay = 520;
+    const refreshIdleDelay = 3000;
+    wordCloudPauseUntil = Math.max(wordCloudPauseUntil, performance.now() + resumeDelay);
+    liveRefreshPauseUntil = Math.max(liveRefreshPauseUntil, performance.now() + refreshIdleDelay);
+    document.body.classList.add('is-scrolling');
+    if (wordCloudFrame) {
+      window.cancelAnimationFrame(wordCloudFrame);
+      wordCloudFrame = null;
+    }
+    liveRefreshAbortController?.abort();
+    if (wordCloudResumeTimer) window.clearTimeout(wordCloudResumeTimer);
+    wordCloudResumeTimer = window.setTimeout(() => {
+      wordCloudResumeTimer = null;
+      resumeWordCloudAnimation?.();
+    }, resumeDelay + 40);
+    if (scrollIdleTimer) window.clearTimeout(scrollIdleTimer);
+    scrollIdleTimer = window.setTimeout(() => {
+      scrollIdleTimer = null;
+      document.body.classList.remove('is-scrolling');
+    }, resumeDelay);
   };
 
-  window.addEventListener('wheel', (event) => {
-    if (event.ctrlKey || event.metaKey || event.shiftKey || isEditable(event.target)) return;
-    if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
-
-    const pixelDelta = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 36 : event.deltaY;
-    if (Math.abs(pixelDelta) < 18) return;
-
-    const target = getScrollTarget(event.target);
-    const current = active.get(target);
-    const base = current ? current.destination : target.scrollTop;
-    const destination = base + pixelDelta * 1.15;
-    const bounded = Math.max(0, Math.min(maxScrollTop(target), destination));
-    if (bounded === target.scrollTop && !current) return;
-
-    event.preventDefault();
-    animateTo(target, bounded);
-  }, { passive: false });
+  window.addEventListener('wheel', pauseWordCloud, { passive: true });
+  window.addEventListener('scroll', pauseWordCloud, { passive: true });
 }
 
 function setupResizableColumns() {
@@ -1122,7 +1392,7 @@ document.addEventListener('keydown', (event) => {
 });
 
 setupResizableColumns();
-setupSmoothWheelScroll();
+setupScrollResponsiveness();
 renderStats();
 render();
 startLiveRefresh();

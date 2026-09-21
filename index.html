@@ -3,7 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Worklog Dashboard Demo</title>
+    <title>工作日志工作台</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23f5f8fc'/%3E%3Cpath d='M18 22h28M18 32h28M18 42h28' stroke='%232563eb' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='M18 22h16M18 42h16' stroke='%230f766e' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="assets/styles.css">
   </head>
   <body>
@@ -16,8 +17,8 @@
             <span></span>
           </div>
           <div>
-            <div class="brand-title">Worklog</div>
-            <div class="brand-subtitle">示例知识库工作台</div>
+            <div class="brand-title">工作日志</div>
+            <div class="brand-subtitle">本地知识库工作台</div>
           </div>
         </div>
 
@@ -45,7 +46,7 @@
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="m21 21-4.35-4.35m1.35-5.15a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z"></path>
             </svg>
-            <input id="searchInput" type="search" placeholder="搜索项目、日期、主题、关键词，按 / 聚焦">
+            <input id="searchInput" type="search" placeholder="搜索项目、日期、产物、关键词，按 / 聚焦">
           </div>
           <div class="topbar-actions">
             <div id="liveStatus" class="live-status" aria-live="polite">
@@ -70,7 +71,7 @@
           <div class="overview-copy">
             <div class="eyebrow">WORKLOG OPERATIONS</div>
             <h1>工作记录工作台</h1>
-            <p id="generatedMeta">正在读取示例日志索引...</p>
+            <p id="generatedMeta">正在读取本地日志索引...</p>
           </div>
           <div id="statGrid" class="stat-grid"></div>
         </section>
@@ -97,11 +98,11 @@
           <div id="activityStrip" class="activity-strip"></div>
         </section>
 
-        <section class="wordheat-band" aria-label="热力词图">
+        <section class="wordheat-band" aria-label="球状词云">
           <div class="section-head">
             <div>
-              <div class="section-title">热力词图</div>
-              <div id="wordHeatMeta" class="section-subtitle">按当前筛选统计高频主题</div>
+              <div class="section-title">球状词云</div>
+              <div id="wordHeatMeta" class="section-subtitle">按当前筛选统计高频主题并旋转展示</div>
             </div>
             <div id="wordHeatCount" class="result-count">0 个词</div>
           </div>
